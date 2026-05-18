@@ -2,6 +2,9 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Config } from './config.js';
 import { renderCaddyfile } from './caddy.js';
+import { ensureWelcomePage } from './welcome.js';
+import { reportCompatibilityIssues } from './compatibility.js';
+import { migrateLegacyCerts } from './migration.js';
 
 const CADDYFILE_PATH = process.env.CADDYFILE_PATH ?? '/etc/caddy/Caddyfile';
 
@@ -24,9 +27,15 @@ function main(argv: string[]): number {
 }
 
 function renderCommand(): number {
-  const config = new Config();
-  const caddyfile = renderCaddyfile(config);
+  reportCompatibilityIssues();
 
+  const config = new Config();
+
+  migrateLegacyCerts({ portalBaseDir: config.portalBaseDir });
+
+  for (const domain of config.domains) ensureWelcomePage(domain);
+
+  const caddyfile = renderCaddyfile(config);
   mkdirSync(dirname(CADDYFILE_PATH), { recursive: true });
   writeFileSync(CADDYFILE_PATH, caddyfile, 'utf8');
 

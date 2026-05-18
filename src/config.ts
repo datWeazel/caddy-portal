@@ -63,6 +63,80 @@ export class Config {
     return '307';
   }
 
+  /** HSTS max-age in seconds, or null when HSTS shouldn't be emitted. */
+  get hstsMaxAge(): number | null {
+    const raw = this.env.HSTS_MAX_AGE;
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+
+  /** Compression: on by default (matching the nginx-era behaviour). */
+  get compressionEnabled(): boolean {
+    return this.env.GZIP !== 'off';
+  }
+
+  /** Index files for static sites. Space-separated, like the original. */
+  get indexFiles(): string[] {
+    const raw = this.env.INDEX_FILES?.trim();
+    if (!raw) return ['index.html'];
+    return raw.split(/\s+/).filter((s) => s.length > 0);
+  }
+
+  /** Body size limit, e.g. "10MB". null = no limit applied. */
+  get clientMaxBodySize(): string | null {
+    return this.env.CLIENT_MAX_BODY_SIZE ?? null;
+  }
+
+  /** Server-level idle timeout (KEEPALIVE_TIMEOUT). null = use Caddy default. */
+  get keepAliveTimeout(): string | null {
+    const raw = this.env.KEEPALIVE_TIMEOUT;
+    if (!raw) return null;
+    // Original was bare seconds (`65`). Caddy needs a Go duration string.
+    return /^\d+$/.test(raw) ? `${raw}s` : raw;
+  }
+
+  /** Proxy timeouts. null = Caddy defaults. */
+  get proxyTimeouts(): { connect: string | null; read: string | null; write: string | null } {
+    return {
+      connect: durationOrNull(this.env.PROXY_CONNECT_TIMEOUT),
+      read: durationOrNull(this.env.PROXY_READ_TIMEOUT),
+      write: durationOrNull(this.env.PROXY_SEND_TIMEOUT),
+    };
+  }
+
+  /** Where access log goes. null = no access log. */
+  get accessLog(): LogTarget {
+    return parseLogTarget(this.env.ACCESS_LOG, '/var/log/caddy/access.log');
+  }
+
+  /** Where error / runtime log goes. Defaults to stderr. */
+  get errorLog(): LogTarget {
+    return parseLogTarget(this.env.ERROR_LOG, '/var/log/caddy/error.log', 'stderr');
+  }
+
+  get errorLogLevel(): string {
+    return (this.env.ERROR_LOG_LEVEL ?? 'ERROR').toUpperCase();
+  }
+
+  /** Raw Caddyfile fragment to splice into the global `{ ... }` block. */
+  get customGlobalBlock(): string | null {
+    return this.env.CUSTOM_CADDY_GLOBAL_BLOCK ?? null;
+  }
+
+  /** Raw Caddyfile fragment to splice into every site block. */
+  get customSiteBlock(): string | null {
+    return this.env.CUSTOM_CADDY_SERVER_BLOCK ?? null;
+  }
+
+  /**
+   * Per-domain override block. Pulled by domain's env_format_name —
+   * `example.com` → `CUSTOM_CADDY_EXAMPLE_COM_BLOCK`.
+   */
+  customSiteBlockFor(envFormatName: string): string | null {
+    return this.env[`CUSTOM_CADDY_${envFormatName}_BLOCK`] ?? null;
+  }
+
   get envDomains(): Domain[] {
     if (!this.env.DOMAINS) return [];
     return parseDomains(this.env.DOMAINS, { defaultStage: this.stage });
@@ -85,6 +159,31 @@ export class Config {
     const all = [...this.envDomains, ...this.autoDiscoveredDomains];
     return dedupe(all, (d) => d.name);
   }
+}
+
+export type LogTarget =
+  | { kind: 'off' }
+  | { kind: 'stdout' }
+  | { kind: 'stderr' }
+  | { kind: 'file'; path: string };
+
+function parseLogTarget(
+  raw: string | undefined,
+  defaultFilePath: string,
+  defaultKind: 'off' | 'stderr' | 'stdout' = 'off',
+): LogTarget {
+  if (raw === undefined || raw === '' || raw === 'off') {
+    return defaultKind === 'off' ? { kind: 'off' } : { kind: defaultKind };
+  }
+  if (raw === 'stdout') return { kind: 'stdout' };
+  if (raw === 'stderr') return { kind: 'stderr' };
+  if (raw === 'default') return { kind: 'file', path: defaultFilePath };
+  return { kind: 'file', path: raw };
+}
+
+function durationOrNull(raw: string | undefined): string | null {
+  if (!raw) return null;
+  return /^\d+$/.test(raw) ? `${raw}s` : raw;
 }
 
 function dedupe<T>(items: T[], keyFn: (t: T) => string): T[] {

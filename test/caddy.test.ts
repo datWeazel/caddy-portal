@@ -103,6 +103,208 @@ describe('renderCaddyfile — per-site TLS overrides', () => {
   });
 });
 
+describe('renderCaddyfile — site-level features', () => {
+  it('emits basic_auth block with bcrypt hash', () => {
+    const cfg = configWith({ STAGE: 'local', DOMAINS: 'user:secret@a.com -> http://app' });
+    const out = renderCaddyfile(cfg);
+    expect(out).toMatch(/basic_auth \{/);
+    expect(out).toMatch(/user \$2[aby]?\$\d+\$/);
+  });
+
+  it('emits IP allow-list with handle blocks', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      DOMAINS: '[1.2.3.4/24 5.6.7.8] a.com -> http://app',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('@disallowed not remote_ip 1.2.3.4/24 5.6.7.8');
+    expect(out).toContain('handle @disallowed {');
+    expect(out).toContain('respond 403');
+    expect(out).toContain('handle {');
+    const aBlock = sliceBlock(out, 'a.com');
+    expect(aBlock).toContain('reverse_proxy http://app');
+  });
+
+  it('combines IP restriction, basic auth and proxy in correct order', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      DOMAINS: '[1.2.3.4]user:pass@a.com -> http://app',
+    });
+    const out = renderCaddyfile(cfg);
+    const aBlock = sliceBlock(out, 'a.com');
+    const idxDisallowed = aBlock.indexOf('@disallowed');
+    const idxBasicAuth = aBlock.indexOf('basic_auth');
+    const idxProxy = aBlock.indexOf('reverse_proxy');
+    expect(idxDisallowed).toBeGreaterThan(-1);
+    expect(idxBasicAuth).toBeGreaterThan(idxDisallowed);
+    expect(idxProxy).toBeGreaterThan(idxBasicAuth);
+  });
+
+  it('emits multi-upstream proxy with all addresses', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      DOMAINS: 'a.com -> https://target1|target2:8000',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('reverse_proxy https://target1 https://target2:8000');
+  });
+
+  it('ignores upstream parameters but renders address', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      DOMAINS: 'a.com -> http://target1|target2[backup max_conns=100]',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('reverse_proxy http://target1 http://target2');
+  });
+
+  it('emits HSTS header when HSTS_MAX_AGE set', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      HSTS_MAX_AGE: '31536000',
+      DOMAINS: 'a.com -> http://app',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('header Strict-Transport-Security "max-age=31536000"');
+  });
+
+  it('omits HSTS header by default', () => {
+    const cfg = configWith({ STAGE: 'local', DOMAINS: 'a.com' });
+    expect(renderCaddyfile(cfg)).not.toContain('Strict-Transport-Security');
+  });
+
+  it('emits key_type override for non-rsa2048', () => {
+    const cfg = configWith({
+      STAGE: 'production',
+      CERTIFICATE_ALGORITHM: 'prime256v1',
+      DOMAINS: 'a.com',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('key_type p256');
+  });
+
+  it('omits tls block entirely when no overrides apply', () => {
+    const cfg = configWith({ STAGE: 'staging', DOMAINS: 'a.com' });
+    const out = renderCaddyfile(cfg);
+    const aBlock = sliceBlock(out, 'a.com');
+    expect(aBlock).not.toContain('tls');
+  });
+});
+
+describe('renderCaddyfile — global knobs', () => {
+  it('emits encode zstd gzip by default', () => {
+    const cfg = configWith({ STAGE: 'local', DOMAINS: 'a.com' });
+    expect(renderCaddyfile(cfg)).toContain('encode zstd gzip');
+  });
+
+  it('omits encode when GZIP=off', () => {
+    const cfg = configWith({ STAGE: 'local', GZIP: 'off', DOMAINS: 'a.com' });
+    expect(renderCaddyfile(cfg)).not.toContain('encode');
+  });
+
+  it('emits request_body max_size when CLIENT_MAX_BODY_SIZE set', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      CLIENT_MAX_BODY_SIZE: '20MB',
+      DOMAINS: 'a.com -> http://app',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('request_body');
+    expect(out).toContain('max_size 20MB');
+  });
+
+  it('emits keepalive idle timeout in global servers block', () => {
+    const cfg = configWith({ STAGE: 'local', KEEPALIVE_TIMEOUT: '90', DOMAINS: 'a.com' });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('servers {');
+    expect(out).toContain('idle 90s');
+  });
+
+  it('emits proxy timeouts when PROXY_*_TIMEOUT set', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      PROXY_CONNECT_TIMEOUT: '10',
+      PROXY_READ_TIMEOUT: '120',
+      DOMAINS: 'a.com -> http://app',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('transport http');
+    expect(out).toContain('dial_timeout 10s');
+    expect(out).toContain('read_timeout 120s');
+  });
+
+  it('emits per-site access log when ACCESS_LOG=stdout', () => {
+    const cfg = configWith({ STAGE: 'local', ACCESS_LOG: 'stdout', DOMAINS: 'a.com' });
+    const out = renderCaddyfile(cfg);
+    const block = sliceBlock(out, 'a.com');
+    expect(block).toContain('log {');
+    expect(block).toContain('output stdout');
+    expect(block).toContain('format json');
+  });
+
+  it('emits ACCESS_LOG=default as file output', () => {
+    const cfg = configWith({ STAGE: 'local', ACCESS_LOG: 'default', DOMAINS: 'a.com' });
+    expect(renderCaddyfile(cfg)).toContain('output file /var/log/caddy/access.log');
+  });
+
+  it('emits global error log default to stderr', () => {
+    const cfg = configWith({ STAGE: 'local', DOMAINS: 'a.com' });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('log default {');
+    expect(out).toContain('output stderr');
+    expect(out).toContain('level ERROR');
+  });
+
+  it('honors ERROR_LOG_LEVEL', () => {
+    const cfg = configWith({ STAGE: 'local', ERROR_LOG_LEVEL: 'debug', DOMAINS: 'a.com' });
+    expect(renderCaddyfile(cfg)).toContain('level DEBUG');
+  });
+
+  it('emits file_server with custom index files', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      INDEX_FILES: 'index.html index.htm welcome.html',
+      DOMAINS: 'a.com',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out).toContain('index index.html index.htm welcome.html');
+  });
+});
+
+describe('renderCaddyfile — CUSTOM_CADDY_* overrides', () => {
+  it('splices CUSTOM_CADDY_GLOBAL_BLOCK into the global options block', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      CUSTOM_CADDY_GLOBAL_BLOCK: 'email admin@example.com',
+      DOMAINS: 'a.com',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(out.split('\n').slice(0, 8).join('\n')).toContain('email admin@example.com');
+  });
+
+  it('splices CUSTOM_CADDY_SERVER_BLOCK into every site', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      CUSTOM_CADDY_SERVER_BLOCK: 'header X-Frame-Options DENY',
+      DOMAINS: 'a.com, b.com',
+    });
+    const out = renderCaddyfile(cfg);
+    const matches = out.match(/X-Frame-Options DENY/g);
+    expect(matches?.length).toBe(2);
+  });
+
+  it('splices per-domain CUSTOM_CADDY_<DOMAIN>_BLOCK into the matching site only', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      CUSTOM_CADDY_A_COM_BLOCK: 'header X-Site a',
+      DOMAINS: 'a.com, b.com',
+    });
+    const out = renderCaddyfile(cfg);
+    expect(sliceBlock(out, 'a.com')).toContain('X-Site a');
+    expect(sliceBlock(out, 'b.com')).not.toContain('X-Site a');
+  });
+});
+
 describe('renderCaddyfile — multiple domains', () => {
   it('emits one block per domain', () => {
     const cfg = configWith({
