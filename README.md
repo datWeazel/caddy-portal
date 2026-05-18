@@ -7,7 +7,9 @@ rebuilt on [Caddy](https://caddyserver.com) instead of Nginx.
 > **Status: pre-release.** Not yet on Docker Hub. The descriptor grammar and
 > documented env vars are stable; internal behaviour may shift until v1.0.
 
-> [!Vibecode Disclaimer]  
+
+> [!CAUTION]
+> **Vibecode Disclaimer**  
 > I built the first version of this rewrite with the help of Claude Code (Claude Opus 4.7). I still made sure I understand the code and its behavior so this isn't a copy-paste AI slop rewrite.
 
 ## Why
