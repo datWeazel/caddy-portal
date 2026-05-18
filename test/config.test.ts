@@ -56,6 +56,19 @@ describe('Config', () => {
     });
   });
 
+  describe('disableTlsAlpnChallenge', () => {
+    it('defaults to false', () => {
+      expect(makeConfig({}).disableTlsAlpnChallenge).toBe(false);
+    });
+
+    it('reads DISABLE_TLS_ALPN_CHALLENGE=true case-insensitively', () => {
+      expect(makeConfig({ DISABLE_TLS_ALPN_CHALLENGE: 'true' }).disableTlsAlpnChallenge).toBe(true);
+      expect(makeConfig({ DISABLE_TLS_ALPN_CHALLENGE: 'TRUE' }).disableTlsAlpnChallenge).toBe(true);
+      expect(makeConfig({ DISABLE_TLS_ALPN_CHALLENGE: 'false' }).disableTlsAlpnChallenge).toBe(false);
+      expect(makeConfig({ DISABLE_TLS_ALPN_CHALLENGE: '1' }).disableTlsAlpnChallenge).toBe(false);
+    });
+  });
+
   describe('keyType', () => {
     it('defaults to rsa2048', () => {
       expect(makeConfig({}).keyType).toBe('rsa2048');

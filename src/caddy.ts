@@ -108,10 +108,12 @@ function renderSiteBlock(domain: Domain, config: Config): string {
 }
 
 /**
- * `tls` block for the site. Combines:
- *   - `tls internal` for local-stage sites
+ * `tls` block for the site. Combines several optional pieces:
+ *   - `tls internal` for local-stage sites (no ACME involved at all)
  *   - explicit ACME issuer override when per-site stage diverges from global
  *   - key_type override when non-default
+ *   - disable_tlsalpn_challenge when the user opts out of TLS-ALPN-01 (e.g.
+ *     because they sit behind a TLS-terminating proxy like Cloudflare)
  */
 function renderTlsBlock(domain: Domain, config: Config): string | null {
   if (domain.stage === 'local') return 'tls internal';
@@ -120,14 +122,16 @@ function renderTlsBlock(domain: Domain, config: Config): string | null {
   const globalCa = acmeDirectoryFor(config.stage);
   const needsIssuerOverride = domainCa !== null && domainCa !== globalCa;
   const needsKeyType = config.keyType !== 'rsa2048';
+  const needsIssuerBlock = needsIssuerOverride || config.disableTlsAlpnChallenge;
 
-  if (!needsIssuerOverride && !needsKeyType) return null;
+  if (!needsKeyType && !needsIssuerBlock) return null;
 
   const lines: string[] = ['tls {'];
   if (needsKeyType) lines.push(`\tkey_type ${config.keyType}`);
-  if (needsIssuerOverride) {
+  if (needsIssuerBlock) {
     lines.push(`\tissuer acme {`);
-    lines.push(`\t\tca ${domainCa}`);
+    if (needsIssuerOverride) lines.push(`\t\tca ${domainCa}`);
+    if (config.disableTlsAlpnChallenge) lines.push(`\t\tdisable_tlsalpn_challenge`);
     lines.push(`\t}`);
   }
   lines.push('}');

@@ -127,6 +127,12 @@ or unsupported.
 | `NUMBITS` | `2048` | RSA key size; `4096` for stronger keys |
 | `CERTIFICATE_ALGORITHM` | `rsa` | Set to `prime256v1` to use ECDSA P-256 keys |
 
+#### ACME challenges
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DISABLE_TLS_ALPN_CHALLENGE` | `false` | Set to `true` to force HTTP-01 only. Use when caddy-portal sits behind a TLS-terminating reverse proxy (Cloudflare orange-cloud, hosting-provider frontend, etc.) — see [Running behind a TLS-terminating proxy](#running-behind-a-tls-terminating-proxy) |
+
 #### Routing
 
 | Variable | Default | Meaning |
@@ -213,6 +219,62 @@ reload.
 
 `VIRTUAL_HOST` accepts the full descriptor syntax — including IP allow-lists
 and basic auth: `VIRTUAL_HOST: "[10.0.0.0/8] admin@s3cret:blog.example.com"`.
+
+## Running behind a TLS-terminating proxy
+
+If something sits in front of caddy-portal that terminates TLS itself — a
+CDN like Cloudflare in proxy mode (orange cloud), a hosting-provider's
+frontend, a managed load balancer — then **the TLS-ALPN-01 ACME challenge
+cannot reach caddy-portal**. The proxy answers the TLS handshake with its
+own cert and never forwards the `acme-tls/1` ALPN extension to origin.
+
+You'll see this in the logs as:
+
+```
+"msg":"challenge failed","challenge_type":"tls-alpn-01"
+"detail":"Cannot negotiate ALPN protocol \"acme-tls/1\" for tls-alpn-01 challenge"
+```
+
+Caddy will fall back to its next issuer (typically ZeroSSL or Google Trust
+Services), and one of them probably issues a cert via HTTP-01 instead. So
+in the short term it just works — you get a valid cert from a different CA
+than you expected, and the logs are noisy with LE failures.
+
+The clean fix is to stop attempting TLS-ALPN-01 at all and have Caddy
+go straight for HTTP-01. Set `DISABLE_TLS_ALPN_CHALLENGE=true`:
+
+```yaml
+services:
+  caddy-portal:
+    image: datweazel/caddy-portal:1
+    environment:
+      DOMAINS: "example.com -> http://app"
+      STAGE: production
+      DISABLE_TLS_ALPN_CHALLENGE: "true"
+```
+
+HTTP-01 works through TLS-terminating proxies because the validator hits
+port 80 and the proxy forwards the `/.well-known/acme-challenge/` path to
+origin — Caddy serves the response, the proxy passes it back, validation
+succeeds.
+
+> **What you see in the browser is the proxy's cert, not Caddy's.** With
+> Cloudflare in orange-cloud mode, the cert chain visible to end users
+> comes from Cloudflare's edge (often issued by Google Trust Services or
+> a different CA, regardless of what caddy-portal does). caddy-portal's
+> own cert is only used between Cloudflare and your origin — and only if
+> Cloudflare's SSL/TLS mode is set to "Full" or "Full (strict)".
+
+> **Side effect of this flag**: emitting `issuer acme { ... }` per-site
+> replaces Caddy's default issuer fallback chain (Let's Encrypt → ZeroSSL
+> → Google Trust Services) with a single Let's Encrypt issuer. If you want
+> to keep fallback issuers AND disable TLS-ALPN-01, write the full issuer
+> list yourself via `CUSTOM_CADDY_SERVER_BLOCK`.
+
+If you'd rather not run behind a proxy at all and want LE to work directly,
+switching the Cloudflare DNS record from "Proxied" (orange) to "DNS only"
+(grey) makes TLS-ALPN-01 work again. You lose Cloudflare's caching, DDoS
+protection, and origin-IP hiding in exchange.
 
 ## Changing configuration at runtime
 
@@ -360,6 +422,20 @@ wget -O- http://your-backend:80`) and that the backend is actually listening.
 Expected on `STAGE: staging`. The staging environment exists exactly to
 test without hitting production rate limits. Switch to `STAGE: production`
 once the staging cert works.
+
+### Logs spam `Cannot negotiate ALPN protocol "acme-tls/1"`
+
+caddy-portal is behind a TLS-terminating proxy that intercepts the
+TLS-ALPN-01 challenge. Set `DISABLE_TLS_ALPN_CHALLENGE=true` — full
+explanation in [Running behind a TLS-terminating proxy](#running-behind-a-tls-terminating-proxy).
+
+### My cert was issued by Google Trust Services / ZeroSSL instead of Let's Encrypt
+
+Caddy's default issuer fallback chain. When the first issuer (Let's
+Encrypt) fails, Caddy automatically tries the next one. Often correlated
+with the ALPN issue above — fixing TLS-ALPN-01 access usually brings LE
+back. See [Running behind a TLS-terminating proxy](#running-behind-a-tls-terminating-proxy)
+for the typical root cause.
 
 ### "no Docker socket mounted; auto-discovery disabled"
 

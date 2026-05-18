@@ -189,6 +189,55 @@ describe('renderCaddyfile — site-level features', () => {
     const aBlock = sliceBlock(out, 'a.com');
     expect(aBlock).not.toContain('tls');
   });
+
+  it('emits disable_tlsalpn_challenge when DISABLE_TLS_ALPN_CHALLENGE=true', () => {
+    const cfg = configWith({
+      STAGE: 'production',
+      DISABLE_TLS_ALPN_CHALLENGE: 'true',
+      DOMAINS: 'a.com',
+    });
+    const out = renderCaddyfile(cfg);
+    const aBlock = sliceBlock(out, 'a.com');
+    expect(aBlock).toContain('issuer acme {');
+    expect(aBlock).toContain('disable_tlsalpn_challenge');
+  });
+
+  it('combines disable_tlsalpn_challenge with per-site stage override', () => {
+    const cfg = configWith({
+      STAGE: 'production',
+      DISABLE_TLS_ALPN_CHALLENGE: 'true',
+      DOMAINS: 'a.com #staging',
+    });
+    const out = renderCaddyfile(cfg);
+    const aBlock = sliceBlock(out, 'a.com');
+    expect(aBlock).toContain('ca https://acme-staging-v02.api.letsencrypt.org/directory');
+    expect(aBlock).toContain('disable_tlsalpn_challenge');
+  });
+
+  it('combines disable_tlsalpn_challenge with key_type override', () => {
+    const cfg = configWith({
+      STAGE: 'production',
+      DISABLE_TLS_ALPN_CHALLENGE: 'true',
+      CERTIFICATE_ALGORITHM: 'prime256v1',
+      DOMAINS: 'a.com',
+    });
+    const out = renderCaddyfile(cfg);
+    const aBlock = sliceBlock(out, 'a.com');
+    expect(aBlock).toContain('key_type p256');
+    expect(aBlock).toContain('disable_tlsalpn_challenge');
+  });
+
+  it('does not emit issuer override for local-stage sites when DISABLE_TLS_ALPN_CHALLENGE=true', () => {
+    const cfg = configWith({
+      STAGE: 'local',
+      DISABLE_TLS_ALPN_CHALLENGE: 'true',
+      DOMAINS: 'a.local',
+    });
+    const out = renderCaddyfile(cfg);
+    const aBlock = sliceBlock(out, 'a.local');
+    expect(aBlock).toContain('tls internal');
+    expect(aBlock).not.toContain('disable_tlsalpn_challenge');
+  });
 });
 
 describe('renderCaddyfile — global knobs', () => {

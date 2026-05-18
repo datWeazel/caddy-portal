@@ -119,6 +119,22 @@ export class Config {
     return (this.env.ERROR_LOG_LEVEL ?? 'ERROR').toUpperCase();
   }
 
+  /**
+   * When true, the ACME issuer for each non-local site emits
+   * `disable_tlsalpn_challenge`. Forces HTTP-01 instead, which is the right
+   * choice when caddy-portal sits behind a TLS-terminating proxy (e.g.
+   * Cloudflare orange-cloud) — that proxy can't pass the `acme-tls/1` ALPN
+   * extension to origin, so TLS-ALPN-01 challenges always fail.
+   *
+   * Side effect: emitting `issuer acme { ... }` per-site replaces Caddy's
+   * default issuer fallback chain (LE → ZeroSSL → GTS) with a single ACME
+   * issuer. Users who need both fallback AND ALPN-disabled should write the
+   * full issuer list via CUSTOM_CADDY_SERVER_BLOCK.
+   */
+  get disableTlsAlpnChallenge(): boolean {
+    return this.env.DISABLE_TLS_ALPN_CHALLENGE?.toLowerCase() === 'true';
+  }
+
   /** Raw Caddyfile fragment to splice into the global `{ ... }` block. */
   get customGlobalBlock(): string | null {
     return this.env.CUSTOM_CADDY_GLOBAL_BLOCK ?? null;
