@@ -7,8 +7,8 @@ rebuilt on [Caddy](https://caddyserver.com) instead of Nginx.
 > **Status: pre-release.** Not yet on Docker Hub. The descriptor grammar and
 > documented env vars are stable; internal behaviour may shift until v1.0.
 
-> [!Vibecode Disclaimer]  
-> I built the first version of this rewrite with the help of Claude Code (Claude Opus 4.7). I still made sure I understand the code and its behavior so this isn't a copy-paste AI slop rewrite.
+[!Vibecode Disclaimer]  
+I built the first version of this rewrite with the help of Claude Code (Claude Opus 4.7). I still made sure I understand the code and its behavior so this isn't a copy-paste AI slop rewrite.
 
 ## Why
 
@@ -19,6 +19,7 @@ rebuilt on [Caddy](https://caddyserver.com) instead of Nginx.
 - **Structured JSON logs** ready for Loki / Elastic / Datadog
 - **Drop-in for the majority** — same `DOMAINS` descriptor syntax, same persistent volume path, same `VIRTUAL_HOST` auto-discovery
 - **Atomic config reloads** via Caddy's admin API — no "reload failed silently" drift
+- **No restart cascades** — backend containers can restart freely (Caddy re-resolves DNS per request), and new domains can be hot-added via `dynamic-env` or `VIRTUAL_HOST` without touching caddy-portal itself. See [Changing configuration at runtime](#changing-configuration-at-runtime)
 
 What's deliberately *not* preserved: `CUSTOM_NGINX_*` env vars,
 bind-mounts of Nginx templates, and a handful of Nginx-specific tuning knobs.
@@ -212,6 +213,105 @@ reload.
 `VIRTUAL_HOST` accepts the full descriptor syntax — including IP allow-lists
 and basic auth: `VIRTUAL_HOST: "[10.0.0.0/8] admin@s3cret:blog.example.com"`.
 
+## Changing configuration at runtime
+
+Two situations where caddy-portal doesn't need a restart.
+
+### Backend container restarts (new Docker IP)
+
+Caddy resolves upstream hostnames at **request time**, not at config load.
+When a container behind `reverse_proxy app:80` is stopped and a new instance
+takes its place — even with a different Docker network IP — the next request
+re-resolves `app` against Docker's embedded DNS and connects to the new IP.
+
+This works out of the box, no `DYNAMIC_UPSTREAM` or `RESOLVER` configuration
+required. The legacy nginx setup needed careful tuning here and silently
+broke when misconfigured; that whole class of bug is gone.
+
+Verified end-to-end: stop a backend container, claim its IP with a temporary
+container so the backend gets reassigned a different IP on next start —
+existing connections fail over to the new IP without caddy-portal
+intervention.
+
+### Adding, removing, or changing domains
+
+Two patterns, depending on whether the new backend is a Docker container
+under your control.
+
+**Pattern A — `VIRTUAL_HOST` on the new container** (preferred when applicable):
+
+Mount the Docker socket once (see [Auto-discovery](#auto-discovery)), then
+any neighbour container with a `VIRTUAL_HOST` env var is picked up
+automatically:
+
+```yaml
+services:
+  new-app:
+    image: your/new-app
+    environment:
+      VIRTUAL_HOST: "new.example.com -> http://new-app:80"
+```
+
+`docker compose up -d new-app` → docker-gen sees the new container →
+caddy-portal re-renders the Caddyfile → Caddy reloads atomically. The new
+site is live in about one second.
+
+Stop the container and the route is removed on the next reload, same loop.
+
+**Pattern B — write the new `DOMAINS` to `dynamic-env`**:
+
+Use this when the new backend isn't a Docker container, or when you want to
+change other settings (redirects, IP allow-lists, basic auth) without
+touching neighbouring containers. Bind-mount the dynamic-env directory:
+
+```yaml
+services:
+  caddy-portal:
+    # ...
+    volumes:
+      - caddy-portal-data:/var/lib/https-portal
+      - ./caddy-portal-env:/var/lib/https-portal/dynamic-env
+```
+
+Then on the host, write the **complete** new DOMAINS list to a file named
+`DOMAINS`:
+
+```sh
+echo "example.com -> http://app:80, new.example.com -> http://newapp:80" \
+  > ./caddy-portal-env/DOMAINS
+```
+
+caddy-portal sees the file change (debounced ~1s via `fs.watch`), re-reads
+the merged environment, re-renders the Caddyfile, and runs `caddy reload`.
+The new site is live without dropping existing connections.
+
+> **Important:** a file in `dynamic-env/` *replaces* the corresponding env
+> var, it doesn't append. To add a domain you must write the full list
+> including any pre-existing ones. Same semantics apply to every other env
+> var overlaid this way.
+
+### Live-tuning any other env var
+
+The same mechanism works for every documented env var. Drop a file named
+after the variable, its contents become the new value, caddy-portal reloads
+within a second:
+
+```sh
+echo "120"     > ./caddy-portal-env/KEEPALIVE_TIMEOUT
+echo "50MB"    > ./caddy-portal-env/CLIENT_MAX_BODY_SIZE
+echo "stdout"  > ./caddy-portal-env/ACCESS_LOG
+echo "31536000" > ./caddy-portal-env/HSTS_MAX_AGE
+```
+
+Filenames must be UPPERCASE env-var-style identifiers (matching
+`^[A-Z][A-Z0-9_]*$`). Lowercase or non-conforming filenames are ignored —
+useful if you want to leave a `README.txt` in the directory.
+
+Settings that affect cert issuance (`STAGE`, `CERTIFICATE_ALGORITHM`,
+`NUMBITS`) can also be changed live, but renewal happens lazily — Caddy
+won't rotate existing certs until they near expiry unless you also set
+`FORCE_RENEW=true` in the same dynamic-env change.
+
 ## Volume layout
 
 Everything that needs to survive container restarts lives under
@@ -229,19 +329,8 @@ Everything that needs to survive container restarts lives under
 └── <domain>/<stage>/...            ← legacy https-portal layout, only present after migration
 ```
 
-### Live config changes via `dynamic-env`
-
-To change configuration without rebuilding the container:
-
-```sh
-docker compose exec caddy-portal sh -c 'echo "120" > /var/lib/https-portal/dynamic-env/KEEPALIVE_TIMEOUT'
-```
-
-caddy-portal sees the file change (debounced ~1s), re-renders the Caddyfile,
-and calls `caddy reload`. No dropped connections.
-
-Filenames must be UPPERCASE env-var-style identifiers. The file contents
-become the env var value (with trailing whitespace trimmed).
+For details on writing into `dynamic-env/` to drive live reloads, see
+[Changing configuration at runtime](#changing-configuration-at-runtime).
 
 ## Coming from `steveltn/https-portal`
 
@@ -302,9 +391,10 @@ for the migration story.
 ### Reload didn't pick up my change
 
 `caddy-portal` watches `/var/run/domains` and `/var/lib/https-portal/dynamic-env`
-with a 1-second debounce. If you're editing env vars on the host, those
-don't propagate into the container at runtime — for that, use `dynamic-env`
-(see [Volume layout](#volume-layout)) or restart the container.
+with a 1-second debounce. If you're editing env vars on the host's compose
+file, those don't propagate into the container at runtime — for that, see
+[Changing configuration at runtime](#changing-configuration-at-runtime)
+or restart the container.
 
 ## License
 
