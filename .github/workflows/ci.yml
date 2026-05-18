@@ -37,6 +37,10 @@ jobs:
         run: npm test
 
   docker-build:
+    # Only validate the Dockerfile on PRs. On main the same code already
+    # passed PR CI, and tag pushes go through release.yml which builds for
+    # real and pushes.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
