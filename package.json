@@ -1,0 +1,22 @@
+{
+  "name": "caddy-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automatic HTTPS via Caddy + Let's Encrypt, configured by a single DOMAINS env var. Spiritual successor to https-portal.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

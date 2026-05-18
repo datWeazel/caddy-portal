@@ -1,0 +1,19 @@
+caddy-portal
+Copyright (c) 2026 Timo Peters
+
+This project is inspired by and partially derived from:
+
+  https-portal
+  https://github.com/SteveLTN/https-portal
+  Copyright (c) Steve Lin and contributors
+  Licensed under the MIT License
+
+Specifically, the domain descriptor grammar (the DOMAINS environment
+variable syntax) and the public configuration surface (environment
+variable names where applicable) are preserved to enable existing
+https-portal users to migrate with minimal changes. The parser, renderer,
+and runtime have been rewritten from scratch in TypeScript against
+Caddy as the underlying HTTPS server.
+
+caddy-portal embeds and redistributes the Caddy web server
+(https://caddyserver.com), which is licensed under the Apache License 2.0.

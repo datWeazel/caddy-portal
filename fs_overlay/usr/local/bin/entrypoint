@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+echo "================================================"
+echo "  caddy-portal — automatic HTTPS via Caddy"
+echo "================================================"
+
+# Render the Caddyfile from DOMAINS / STAGE / ... env vars.
+portal render
+
+# Hand control over to Caddy. PID 1 from here on.
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

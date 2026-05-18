@@ -1,0 +1,23 @@
+services:
+  caddy-portal:
+    build: .
+    image: caddy-portal:dev
+    ports:
+      - "8080:80"
+      - "8443:443"
+      - "8443:443/udp"
+    environment:
+      STAGE: local
+      DOMAINS: >
+        test.localhost,
+        app.localhost -> http://whoami:80
+    volumes:
+      - caddy-portal-data:/var/lib/https-portal
+    depends_on:
+      - whoami
+
+  whoami:
+    image: traefik/whoami:v1.10
+
+volumes:
+  caddy-portal-data:
