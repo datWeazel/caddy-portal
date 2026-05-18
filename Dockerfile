@@ -11,14 +11,31 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
-# Remove dev-only dependencies (none currently needed at runtime, but the
-# install above pulled vitest etc. — strip them so the runtime stage stays slim)
+# Strip dev dependencies for the runtime image
 RUN npm prune --omit=dev
 
 
-# ---- Stage 2: runtime image ------------------------------------------------
+# ---- Stage 2: fetch architecture-specific docker-gen binary ----------------
+FROM alpine:3.20 AS docker-gen
+ARG TARGETPLATFORM
+ARG DOCKER_GEN_VERSION=0.14.7
+
+RUN apk add --no-cache wget tar ca-certificates && \
+    case "${TARGETPLATFORM}" in \
+      linux/amd64)  ARCH=amd64  ;; \
+      linux/arm64)  ARCH=arm64  ;; \
+      linux/arm/v7) ARCH=armv7  ;; \
+      linux/386)    ARCH=i386   ;; \
+      *) echo "Unsupported TARGETPLATFORM: ${TARGETPLATFORM}" && exit 1 ;; \
+    esac && \
+    wget -q "https://github.com/nginx-proxy/docker-gen/releases/download/${DOCKER_GEN_VERSION}/docker-gen-linux-${ARCH}-${DOCKER_GEN_VERSION}.tar.gz" \
+         -O /tmp/docker-gen.tar.gz && \
+    tar -xzf /tmp/docker-gen.tar.gz -C /usr/local/bin docker-gen && \
+    rm /tmp/docker-gen.tar.gz
+
+
+# ---- Stage 3: runtime image ------------------------------------------------
 # caddy:2-alpine ships the static `caddy` binary plus an Alpine userland.
-# Node.js comes from the Alpine repos so we can run the compiled orchestrator.
 FROM caddy:2-alpine
 
 RUN apk add --no-cache nodejs
@@ -27,8 +44,9 @@ WORKDIR /opt/portal
 COPY --from=build /build/dist ./dist
 COPY --from=build /build/node_modules ./node_modules
 COPY --from=build /build/package.json ./package.json
+COPY --from=docker-gen /usr/local/bin/docker-gen /usr/local/bin/docker-gen
 
-# fs_overlay carries the entrypoint script and any other runtime assets.
+# fs_overlay carries entrypoint scripts and the docker-gen template
 COPY fs_overlay /
 
 RUN chmod +x /usr/local/bin/portal /usr/local/bin/entrypoint
