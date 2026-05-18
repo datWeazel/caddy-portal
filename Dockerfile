@@ -16,19 +16,23 @@ RUN npm prune --omit=dev
 
 
 # ---- Stage 2: fetch architecture-specific docker-gen binary ----------------
+# Releases at https://github.com/nginx-proxy/docker-gen/releases publish two
+# Linux flavours: glibc-linked `docker-gen-linux-*` and musl-linked
+# `docker-gen-alpine-linux-*`. Our runtime is caddy:2-alpine (musl), so we
+# pull the alpine variants. The arch names differ from buildx's TARGETPLATFORM:
+# arm v7 is named `armhf` in the docker-gen releases.
 FROM alpine:3.20 AS docker-gen
 ARG TARGETPLATFORM
-ARG DOCKER_GEN_VERSION=0.14.7
+ARG DOCKER_GEN_VERSION=0.16.3
 
 RUN apk add --no-cache wget tar ca-certificates && \
     case "${TARGETPLATFORM}" in \
-      linux/amd64)  ARCH=amd64  ;; \
-      linux/arm64)  ARCH=arm64  ;; \
-      linux/arm/v7) ARCH=armv7  ;; \
-      linux/386)    ARCH=i386   ;; \
+      linux/amd64)  ARCH=amd64 ;; \
+      linux/arm64)  ARCH=arm64 ;; \
+      linux/arm/v7) ARCH=armhf ;; \
       *) echo "Unsupported TARGETPLATFORM: ${TARGETPLATFORM}" && exit 1 ;; \
     esac && \
-    wget -q "https://github.com/nginx-proxy/docker-gen/releases/download/${DOCKER_GEN_VERSION}/docker-gen-linux-${ARCH}-${DOCKER_GEN_VERSION}.tar.gz" \
+    wget -q "https://github.com/nginx-proxy/docker-gen/releases/download/${DOCKER_GEN_VERSION}/docker-gen-alpine-linux-${ARCH}-${DOCKER_GEN_VERSION}.tar.gz" \
          -O /tmp/docker-gen.tar.gz && \
     tar -xzf /tmp/docker-gen.tar.gz -C /usr/local/bin docker-gen && \
     rm /tmp/docker-gen.tar.gz
