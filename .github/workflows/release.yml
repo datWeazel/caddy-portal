@@ -89,7 +89,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/386,linux/amd64,linux/arm/v7,linux/arm64
+          # linux/386 is intentionally not built: caddy:2-alpine has no 32-bit
+          # x86 manifest. Adding it would require building Caddy from source
+          # via xcaddy, which we'd rather avoid for the base release path.
+          platforms: linux/amd64,linux/arm/v7,linux/arm64
           push: true
           provenance: mode=max
           sbom: true
