@@ -492,6 +492,19 @@ block, and Caddy rejects a second one: the container exits right after
 startup. In that case unset `KEEPALIVE_TIMEOUT` and add `idle <duration>` to
 the `timeouts` block above instead.
 
+### Container exits right after startup without a clear error
+
+Caddy 2.11.6 and later don't print config errors when `caddy run` fails
+([caddyserver/caddy#7962](https://github.com/caddyserver/caddy/issues/7962)).
+To work around this, caddy-portal runs `caddy validate` once after a failed
+start. Look for the line
+`[caddy-portal] caddy exited with code 1; running 'caddy validate' to surface the error:`
+in the log. The actual error follows it, e.g.
+`unrecognized global option: ...`.
+
+If it reports `config is valid` instead, the config is fine and Caddy failed
+for a different reason (e.g. a port already in use).
+
 ### `[caddy-portal] CUSTOM_NGINX_* will be ignored`
 
 Expected. See [docs/migration.md#not-supported](docs/migration.md#not-supported)
