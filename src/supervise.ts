@@ -48,7 +48,9 @@ export async function supervise(): Promise<number> {
   watchPathIfExists(DYNAMIC_ENV_DIR, triggerReload);
 
   // Forward shutdown signals to Caddy
+  let shuttingDown = false;
   const forwardSignal = (sig: NodeJS.Signals) => {
+    shuttingDown = true;
     console.log(`[caddy-portal] received ${sig}, shutting down...`);
     caddy.kill(sig);
     dockerGen?.kill(sig);
@@ -60,6 +62,8 @@ export async function supervise(): Promise<number> {
   const exitCode: number = await new Promise((resolve) => {
     caddy.on('exit', (code) => resolve(code ?? 1));
   });
+
+  if (exitCode !== 0 && !shuttingDown) diagnoseFailedRun(exitCode);
 
   if (dockerGen && dockerGen.exitCode === null) dockerGen.kill();
   return exitCode;
@@ -101,6 +105,23 @@ function spawnCaddy(): ChildProcess {
   return spawn('caddy', ['run', '--config', CADDYFILE_PATH, '--adapter', 'caddyfile'], {
     stdio: 'inherit',
   });
+}
+
+/**
+ * Caddy 2.11.6+ exits `caddy run` without printing config errors
+ * (caddyserver/caddy#7962), while `caddy validate` still reports them.
+ * Running it once after a failed start makes the cause visible in the log.
+ */
+function diagnoseFailedRun(exitCode: number): void {
+  console.error(
+    `[caddy-portal] caddy exited with code ${exitCode}; running 'caddy validate' to surface the error:`,
+  );
+  const result = spawnSync('caddy', ['validate', '--config', CADDYFILE_PATH, '--adapter', 'caddyfile'], {
+    stdio: 'inherit',
+  });
+  if (result.status === 0) {
+    console.error('[caddy-portal] config is valid; caddy failed for a different reason');
+  }
 }
 
 function spawnDockerGen(): ChildProcess {
