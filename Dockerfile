@@ -21,7 +21,7 @@ RUN npm prune --omit=dev
 # ---- Stage 2: fetch architecture-specific docker-gen binary ----------------
 # Releases at https://github.com/nginx-proxy/docker-gen/releases publish two
 # Linux flavours: glibc-linked `docker-gen-linux-*` and musl-linked
-# `docker-gen-alpine-linux-*`. Our runtime is caddy:2-alpine (musl), so we
+# `docker-gen-alpine-linux-*`. Our runtime is Caddy's alpine image (musl), so we
 # pull the alpine variants. The arch names differ from buildx's TARGETPLATFORM:
 # arm v7 is named `armhf` in the docker-gen releases.
 FROM alpine:3.24 AS docker-gen
@@ -42,8 +42,10 @@ RUN apk add --no-cache wget tar ca-certificates && \
 
 
 # ---- Stage 3: runtime image ------------------------------------------------
-# caddy:2-alpine ships the static `caddy` binary plus an Alpine userland.
-FROM caddy:2-alpine
+# The Caddy alpine image ships the static `caddy` binary plus an Alpine
+# userland. Pinned to an exact version: Caddy patch releases have changed
+# request handling defaults before, so upgrades should arrive via PR.
+FROM caddy:2.11.7-alpine
 
 RUN apk add --no-cache nodejs
 
