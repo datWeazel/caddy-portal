@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- Stage 1: compile TypeScript to plain JS -------------------------------
-FROM node:22-alpine AS build
+# Runs on the build host's platform: the output is plain JS and the runtime
+# dependencies are pure JS, so nothing here is architecture-specific. This
+# also covers linux/arm/v7, for which node:24-alpine publishes no image.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS build
 WORKDIR /build
 
 COPY package.json package-lock.json* ./
@@ -21,9 +24,9 @@ RUN npm prune --omit=dev
 # `docker-gen-alpine-linux-*`. Our runtime is caddy:2-alpine (musl), so we
 # pull the alpine variants. The arch names differ from buildx's TARGETPLATFORM:
 # arm v7 is named `armhf` in the docker-gen releases.
-FROM alpine:3.20 AS docker-gen
+FROM alpine:3.24 AS docker-gen
 ARG TARGETPLATFORM
-ARG DOCKER_GEN_VERSION=0.16.3
+ARG DOCKER_GEN_VERSION=0.17.2
 
 RUN apk add --no-cache wget tar ca-certificates && \
     case "${TARGETPLATFORM}" in \
