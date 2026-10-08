@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Must match the Node major shipped in the runtime image, so bump by hand
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  # Covers the FROM lines only. DOCKER_GEN_VERSION is an ARG and needs a
+  # manual bump.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Stay on LTS lines; odd Node majors are never LTS
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -460,6 +460,41 @@ curl -sI https://your-domain.example/ | grep -i alt-svc
 If `alt-svc` is missing, you probably didn't expose `443:443/udp` — Caddy
 emits the header only when the UDP listener is actually bound.
 
+### Backend no longer receives some request headers, or clients get `431`
+
+Newer Caddy releases (2.11.4 and later) harden request handling, which can
+surface as breakage after updating caddy-portal:
+
+- **Header fields containing `_` or `.`** (e.g. `X_Api_Key`, `X.Trace`) are
+  dropped before they reach the backend.
+- **Request headers are limited to 16 KiB.** Larger ones (giant cookies,
+  oversized tokens) get `431 Request Header Fields Too Large` over HTTP/1.1;
+  over HTTP/2 the client sees a protocol error instead.
+- **Stalled request bodies or responses are cut off after 1 minute** without
+  any progress. Pauses between writes (e.g. SSE) don't count.
+
+Each of these can be relaxed via `CUSTOM_CADDY_GLOBAL_BLOCK`. Only list what
+you actually need:
+
+```yaml
+environment:
+  CUSTOM_CADDY_GLOBAL_BLOCK: |
+    servers {
+      expected_underscore_headers X_Api_Key
+      expected_dot_headers X.Trace
+      max_header_size 64KB
+      timeouts {
+        read_body_idle 5m
+        write_idle 5m
+      }
+    }
+```
+
+If you also set `KEEPALIVE_TIMEOUT`, caddy-portal already emits a `servers`
+block, and Caddy rejects a second one: the container exits right after
+startup. In that case unset `KEEPALIVE_TIMEOUT` and add `idle <duration>` to
+the `timeouts` block above instead.
+
 ### `[caddy-portal] CUSTOM_NGINX_* will be ignored`
 
 Expected. See [docs/migration.md#not-supported](docs/migration.md#not-supported)
