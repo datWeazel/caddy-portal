@@ -45,7 +45,7 @@ RUN apk add --no-cache wget tar ca-certificates && \
 # The Caddy alpine image ships the static `caddy` binary plus an Alpine
 # userland. Pinned to an exact version: Caddy patch releases have changed
 # request handling defaults before, so upgrades should arrive via PR.
-FROM caddy:2.11.7-alpine
+FROM caddy:2.11.9-alpine
 
 RUN apk add --no-cache nodejs
 
